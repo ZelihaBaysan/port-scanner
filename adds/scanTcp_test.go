@@ -1,35 +1,51 @@
 package adds
 
 import (
+	"fmt"
 	"testing"
-	"time"
 )
 
-// TestScanPortTCP verifies that the ScanPortTCP function correctly identifies the state of a TCP port.
+// TestScanPortTCP tests the ScanPortTCP function by evaluating its response for different port states.
 //
-// This test case uses a loopback address (localhost) and commonly open and closed ports to ensure
-// that the function behaves as expected. It also includes tests with an invalid port to simulate
-// network errors and timeouts.
+// The ScanPortTCP function is tested under the following scenarios:
+// - A common open port (e.g., 80 for HTTP) to verify if it correctly identifies the port as "Open".
+// - A common closed port (e.g., 9999) to verify if it correctly identifies the port as "Closed".
+// - A port on a private IP range (e.g., 10.0.0.1) to simulate a "Filtered" state, assuming the port is inaccessible.
+//
+// Test Parameters:
+// - ip: The IP address to scan. Different IP addresses are used to cover various test scenarios.
+// - port: The port number to scan. The tests cover both open and closed ports, as well as a simulated filtered state.
+//
+// Expected Results:
+// - The expected result is a string indicating the state of the port, which can be "Open", "Closed", or "Filtered".
+//
+// The function iterates through a list of test cases, where each case specifies an IP address and a port number.
+// For each test case, it invokes the ScanPortTCP function and compares the result with the expected port state.
+// Any mismatch between the actual result and the expected result is reported as an error.
+// The test also prints the result for each IP and port combination for debugging purposes.
 func TestScanPortTCP(t *testing.T) {
-	// Test cases
 	tests := []struct {
 		ip       string
 		port     int
 		expected string
 	}{
-		{"127.0.0.1", 80, Open},     // Commonly open port
-		{"127.0.0.1", 9999, Closed}, // Commonly closed port
-		{"127.0.0.1", 0, Filtered},  // Invalid port number
+		// Test with a common open port (e.g., 80 for HTTP)
+		{"127.0.0.1", 80, Open},
+		// Test with a common closed port
+		{"127.0.0.1", 9999, Closed},
+		// Test with a port that will be filtered (e.g., using a private IP range)
+		{"10.0.0.1", 80, Filtered},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.ip, func(t *testing.T) {
-			// Allow some time for the scan to complete
-			time.Sleep(1 * time.Second)
-
-			result := ScanPortTCP(tt.ip, tt.port)
-			if result != tt.expected {
-				t.Errorf("ScanPortTCP(%s, %d) = %v; want %v", tt.ip, tt.port, result, tt.expected)
+	for _, test := range tests {
+		t.Run(fmt.Sprintf("%s:%d", test.ip, test.port), func(t *testing.T) {
+			// Execute the ScanPortTCP function and capture the result
+			result := ScanPortTCP(test.ip, test.port)
+			// Compare the result with the expected output
+			if result != test.expected {
+				t.Errorf("IP: %s, Port: %d, expected %s, got %s", test.ip, test.port, test.expected, result)
+			} else {
+				fmt.Printf("IP: %s, Port: %d, Result: %s\n", test.ip, test.port, result)
 			}
 		})
 	}
