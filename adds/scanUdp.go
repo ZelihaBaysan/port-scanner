@@ -25,12 +25,12 @@ func ScanPortUDP(ip string, port int) string {
 	conn, err := net.DialTimeout("udp", address, timeout)
 	if err != nil {
 		if _, ok := err.(*net.OpError); ok {
-			return Filtered
+			return "Filtered"
 		}
-		return Closed
+		return "Closed"
 	}
 	conn.Close()
-	return Open
+	return "Open"
 }
 
 // WorkerUDP is a worker function that scans UDP ports and sends the results to channels.
@@ -52,7 +52,7 @@ func WorkerUDP(ip string, ports, results chan int, openPorts chan ServiceVersion
 		state := ScanPortUDP(ip, port)
 		service := DetectService(port, services)
 		results <- port
-		if state == Open {
+		if state == "Open" {
 			openPorts <- service
 		}
 		fmt.Printf("Port %d: %s, Service: %s, Response: %s\n", port, state, service.Service, service.Response)

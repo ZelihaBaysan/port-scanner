@@ -1,6 +1,7 @@
 package adds
 
 import (
+	"fmt"
 	"net"
 	"time"
 )
@@ -36,8 +37,9 @@ func ScanICMP(ip string) string {
 // to the `results` channel. After processing all IP addresses, it signals completion by sending a value to the `done` channel.
 func WorkerICMP(ips <-chan string, results chan<- string, done chan<- bool) {
 	for ip := range ips {
-		result := ScanICMP(ip)
-		results <- ip + ": " + result
+		state := ScanICMP(ip)
+		results <- fmt.Sprintf("IP: %s, Response: %s", ip, state)
+		fmt.Printf("IP: %s, Response: %s\n", ip, state)
 	}
 	done <- true
 }
