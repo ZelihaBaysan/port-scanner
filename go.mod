@@ -1,3 +1,3 @@
-module port
+module det
 
 go 1.18

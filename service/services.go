@@ -1,17 +1,55 @@
-package adds
+package service
 
-// Servicess is a map that associates well-known port numbers with their corresponding services.
+// ServiceVersion holds information about a detected service.
 //
-// This map is populated with data from the official IANA service names and port numbers registry,
-// which can be found at https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.csv.
-//
-// The key is an integer representing the port number, and the value is a string representing the service name.
+// Fields:
+// - Port: The port number where the service is detected.
+// - Protocol: The protocol used by the service (default is "Unknown").
+// - Service: The name of the detected service.
+// - Response: The response message indicating whether a service was detected.
 //
 // Example:
-// - 1: "tcpmux"
-// - 7: "echo"
-// - 13: "daytime"
+//
+//	svc := ServiceVersion{
+//	    Port:     80,
+//	    Protocol: "TCP",
+//	    Service:  "HTTP",
+//	    Response: "Service Detected",
+//	}
+type ServiceVersion struct {
+	Port     int    // The port number where the service is detected.
+	Protocol string // The protocol used by the service (default is "Unknown").
+	Service  string // The name of the detected service.
+	Response string // The response message indicating whether a service was detected.
+}
 
+// DetectService identifies the service running on a given port.
+//
+// Parameters:
+// - port: The port number to check for a running service.
+// - services: A map of known services where the key is the port number and the value is the service name.
+//
+// Returns:
+// - A ServiceVersion struct containing information about the detected service.
+//
+// Example:
+//
+//	svc := DetectService(80, knownServices)
+func DetectService(port int, services map[int]string) ServiceVersion {
+	if svc, ok := services[port]; ok {
+		return ServiceVersion{Port: port, Protocol: "Unknown", Service: svc, Response: "Service Detected"}
+	}
+	return ServiceVersion{Port: port, Protocol: "Unknown", Service: "Unknown", Response: "Service Not Detected"}
+}
+
+// Servicess is a map of well-known services where the key is the port number and the value is the service name.
+//
+// Example:
+//
+//	services := map[int]string{
+//	    80:  "http",
+//	    443: "https",
+//	}
 var Servicess = map[int]string{
 	1:           "tcpmux",
 	2:           "compressnet",

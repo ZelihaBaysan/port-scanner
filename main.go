@@ -1,29 +1,195 @@
 package main
 
 import (
+	"det/service"
 	"fmt"
 	"net"
 	"os"
-	"port/adds"
+	"time"
 )
 
-// PortScanner defines a structure for scanning ports on a given domain.
+// ScanPortTCP scans a TCP port on a given IP address to determine its state.
 //
-// This structure encapsulates all the necessary fields and channels needed
-// to perform a comprehensive scan on a domain's IP addresses across TCP, UDP, and ICMP protocols.
+// Parameters:
+// - ip: The IP address to scan.
+// - port: The TCP port to scan.
+//
+// Returns:
+// - A string indicating the state of the port: "Open", "Closed", or "Filtered".
+//
+// Example:
+//
+//	state := ScanPortTCP("192.168.1.1", 80)
+func ScanPortTCP(ip string, port int) string {
+	address := fmt.Sprintf("%s:%d", ip, port)
+	timeout := 10 * time.Second
+	conn, err := net.DialTimeout("tcp", address, timeout)
+	if err != nil {
+		if _, ok := err.(*net.OpError); ok {
+			return "Filtered"
+		}
+		return "Closed"
+	}
+	conn.Close()
+	return "Open"
+}
+
+// ScanPortUDP scans a UDP port on a given IP address to determine its state.
+//
+// Parameters:
+// - port: The UDP port to scan.
+// - domain: The domain or IP address to scan.
+//
+// Returns:
+// - An error if the scan fails, otherwise nil.
+//
+// Example:
+//
+//	err := scanUDP(53, "example.com")
+func scanUDP(port int, domain string) error {
+	address := fmt.Sprintf("%s:%d", domain, port)
+	conn, err := net.DialTimeout("udp", address, 5*time.Second)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	// Send a custom message
+	_, err = conn.Write([]byte("ping"))
+	if err != nil {
+		return err
+	}
+
+	// Set a deadline for reading a response
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	buf := make([]byte, 1024)
+	_, err = conn.Read(buf)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// ScanICMP scans an IP address using ICMP to determine its reachability.
+//
+// Parameters:
+// - ip: The IP address to scan.
+//
+// Returns:
+// - A string indicating whether the IP is "Reachable" or "Unreachable".
+//
+// Example:
+//
+//	state := ScanICMP("192.168.1.1")
+func ScanICMP(ip string) string {
+	timeout := 5 * time.Second
+	conn, err := net.DialTimeout("ip4:icmp", ip, timeout)
+	if err != nil {
+		return "Unreachable"
+	}
+	conn.Close()
+	return "Reachable"
+}
+
+// WorkerTCP scans TCP ports and sends results to channels.
+//
+// Parameters:
+// - ip: The IP address to scan.
+// - ports: A channel for ports to scan.
+// - results: A channel to send the scan results to.
+// - openPorts: A channel to send open port information to.
+// - done: A channel to signal the completion of the work.
+// - services: A map of known services.
+//
+// Example:
+//
+//	go WorkerTCP("192.168.1.1", ports, results, openPorts, done, services)
+func WorkerTCP(ip string, ports, results chan int, openPorts chan service.ServiceVersion, done chan bool, services map[int]string) {
+	for port := range ports {
+		state := ScanPortTCP(ip, port)
+		service := service.DetectService(port, services)
+		results <- port
+		if state == "Open" {
+			openPorts <- service
+		}
+		fmt.Printf("Port %d: %s, Service: %s, Response: %s\n", port, state, service.Service, service.Response)
+	}
+	done <- true
+}
+
+// WorkerUDP scans UDP ports and sends results to channels.
+//
+// Parameters:
+// - domain: The domain or IP address to scan.
+// - ports: A channel for ports to scan.
+// - results: A channel to send the scan results to.
+// - openPorts: A channel to send open port information to.
+// - done: A channel to signal the completion of the work.
+// - services: A map of known services.
+//
+// Example:
+//
+//	go WorkerUDP("example.com", ports, results, openPorts, done, services)
+func WorkerUDP(domain string, ports, results chan int, openPorts chan service.ServiceVersion, done chan bool, services map[int]string) {
+	for port := range ports {
+		err := scanUDP(port, domain)
+		state := "Closed"
+		if err == nil {
+			state = "Open"
+			service := service.DetectService(port, services)
+			openPorts <- service
+		}
+		results <- port
+		fmt.Printf("Port %d (UDP): %s\n", port, state)
+	}
+	done <- true
+}
+
+// WorkerICMP scans IP addresses for ICMP reachability.
+//
+// Parameters:
+// - ips: A channel for IP addresses to scan.
+// - results: A channel to send the scan results to.
+// - done: A channel to signal the completion of the work.
+//
+// Example:
+//
+//	go WorkerICMP(ips, results, done)
+func WorkerICMP(ips <-chan string, results chan<- string, done chan<- bool) {
+	for ip := range ips {
+		state := ScanICMP(ip)
+		results <- fmt.Sprintf("IP: %s, Response: %s", ip, state)
+		fmt.Printf("IP: %s, Response: %s\n", ip, state)
+	}
+	done <- true
+}
+
+// PortScanner struct holds details for port scanning.
 //
 // Fields:
-// - Domain: The domain name to be scanned.
-// - IPs: A slice of IP addresses associated with the domain, resolved using DNS lookup.
-// - Ports: A slice of all port numbers to be scanned, ranging from 1 to 65535.
-// - NumWorkers: The number of worker goroutines that will perform the scanning concurrently.
-// - PortChannel: A buffered channel for sending port numbers to be scanned by the workers.
-// - ResultChannel: A buffered channel for receiving scan results from the workers.
-// - OpenPorts: A buffered channel for collecting information about open TCP ports and their corresponding service versions.
-// - OpenPortsUDP: A buffered channel for collecting information about open UDP ports and their corresponding service versions.
-// - ICMPResults: A buffered channel for collecting results from ICMP (ping) scans, indicating IP reachability.
-// - Done: A channel used by worker goroutines to signal when they have completed their tasks.
-// - Services: A map that associates port numbers with human-readable service names (e.g., HTTP for port 80).
+// - Domain: The domain to scan.
+// - IPs: A list of resolved IP addresses for the domain.
+// - Ports: A list of ports to scan.
+// - NumWorkers: The number of worker goroutines to use for scanning.
+// - PortChannel: A channel for distributing ports to workers.
+// - ResultChannel: A channel for receiving scan results.
+// - OpenPorts: A channel for open TCP port information.
+// - OpenPortsUDP: A channel for open UDP port information.
+// - ICMPResults: A channel for ICMP reachability results.
+// - Done: A channel to signal the completion of all workers.
+// - Services: A map of known services.
+//
+// Example:
+//
+//	scanner := &PortScanner{
+//	    Domain:      "example.com",
+//	    IPs:         []string{"192.168.1.1"},
+//	    Ports:       []int{80, 443},
+//	    NumWorkers:  10,
+//	    PortChannel: make(chan int),
+//	    // ...
+//	}
 type PortScanner struct {
 	Domain        string
 	IPs           []string
@@ -31,33 +197,26 @@ type PortScanner struct {
 	NumWorkers    int
 	PortChannel   chan int
 	ResultChannel chan int
-	OpenPorts     chan adds.ServiceVersion
-	OpenPortsUDP  chan adds.ServiceVersion
+	OpenPorts     chan service.ServiceVersion
+	OpenPortsUDP  chan service.ServiceVersion
 	ICMPResults   chan string
 	Done          chan bool
 	Services      map[int]string
 }
 
-// NewTarget initializes a new PortScanner instance for a specified domain.
-//
-// This function is responsible for resolving the given domain to its associated
-// IP addresses using a DNS lookup. It also initializes all necessary fields and channels
-// for scanning, including the list of ports to be scanned and the number of worker goroutines.
+// NewTarget creates a new PortScanner instance with initialized channels and fields.
 //
 // Parameters:
-// - domain: The domain name to be scanned.
-// - numWorkers: The number of concurrent worker goroutines to use for scanning.
+// - domain: The domain to scan.
+// - numWorkers: The number of worker goroutines to use for scanning.
 //
 // Returns:
-// - A pointer to a PortScanner instance configured for the specified domain.
-// - An error if the domain could not be resolved to any IP addresses.
+// - A pointer to a newly created PortScanner instance.
+// - An error if the domain cannot be resolved to an IP address.
 //
 // Example:
 //
 //	scanner, err := NewTarget("example.com", 100)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
 func NewTarget(domain string, numWorkers int) (*PortScanner, error) {
 	// Perform DNS lookup to resolve the domain into a list of IP addresses
 	ips, err := net.LookupHost(domain)
@@ -79,39 +238,32 @@ func NewTarget(domain string, numWorkers int) (*PortScanner, error) {
 		NumWorkers:    numWorkers,
 		PortChannel:   make(chan int, len(ports)),
 		ResultChannel: make(chan int, len(ports)),
-		OpenPorts:     make(chan adds.ServiceVersion, len(ports)),
-		OpenPortsUDP:  make(chan adds.ServiceVersion, len(ports)),
+		OpenPorts:     make(chan service.ServiceVersion, len(ports)),
+		OpenPortsUDP:  make(chan service.ServiceVersion, len(ports)),
 		ICMPResults:   make(chan string, len(ips)),
 		Done:          make(chan bool, numWorkers*2+len(ips)),
 		Services:      make(map[int]string),
 	}, nil
 }
 
-// Scan initiates the port scanning process on the IP addresses associated with the domain.
+// Scan performs the port scanning and writes results to a file.
 //
-// This method launches worker goroutines for scanning TCP, UDP, and ICMP. It distributes
-// ports and IP addresses among the workers, waits for them to complete their tasks, and then
-// collects the results. Finally, it writes the results to an output file.
+// Example:
 //
-// The method involves several key steps:
-// 1. Launching TCP, UDP, and ICMP worker goroutines.
-// 2. Enqueueing all ports into the PortChannel for the workers to process.
-// 3. Sending IP addresses to the ICMP workers via the IP channel.
-// 4. Waiting for all scanning tasks to be completed.
-// 5. Writing the results of open TCP/UDP ports and ICMP reachability to an output file.
+//	scanner.Scan()
 func (t *PortScanner) Scan() {
 	// Create a channel for distributing IP addresses to ICMP workers
 	ipChannel := make(chan string, len(t.IPs))
 
 	// Start the specified number of worker goroutines for TCP and UDP scanning
 	for i := 0; i < t.NumWorkers; i++ {
-		go adds.WorkerTCP("", t.PortChannel, t.ResultChannel, t.OpenPorts, t.Done, t.Services)
-		go adds.WorkerUDP("", t.PortChannel, t.ResultChannel, t.OpenPortsUDP, t.Done, t.Services)
+		go WorkerTCP("", t.PortChannel, t.ResultChannel, t.OpenPorts, t.Done, t.Services)
+		go WorkerUDP("", t.PortChannel, t.ResultChannel, t.OpenPortsUDP, t.Done, t.Services)
 	}
 
 	// Start a worker goroutine for each IP address for ICMP scanning
 	for i := 0; i < len(t.IPs); i++ {
-		go adds.WorkerICMP(ipChannel, t.ICMPResults, t.Done)
+		go WorkerICMP(ipChannel, t.ICMPResults, t.Done)
 	}
 
 	// Enqueue all ports to the PortChannel for the TCP and UDP workers
@@ -195,14 +347,6 @@ func (t *PortScanner) Scan() {
 	}
 }
 
-// main is the entry point of the application.
-//
-// This function prompts the user to enter a domain name. It then creates a
-// PortScanner instance configured for that domain and starts the port scanning process.
-//
-// The domain entered by the user is resolved to IP addresses, and the Scan method
-// is called to perform the actual scanning. Results are written to an output file
-// after the scan is completed.
 func main() {
 	var domain string
 	fmt.Print("Enter domain: ")
