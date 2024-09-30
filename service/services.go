@@ -35,8 +35,8 @@ type ServiceVersion struct {
 // Example:
 //
 //	svc := DetectService(80, knownServices)
-func DetectService(port int, services map[int]string) ServiceVersion {
-	if svc, ok := services[port]; ok {
+func DetectService(port int, Services map[int]string) ServiceVersion {
+	if svc, ok := Services[port]; ok {
 		return ServiceVersion{Port: port, Protocol: "Unknown", Service: svc, Response: "Service Detected"}
 	}
 	return ServiceVersion{Port: port, Protocol: "Unknown", Service: "Unknown", Response: "Service Not Detected"}
@@ -50,7 +50,7 @@ func DetectService(port int, services map[int]string) ServiceVersion {
 //	    80:  "http",
 //	    443: "https",
 //	}
-var Servicess = map[int]string{
+var Services = map[int]string{
 	1:           "tcpmux",
 	2:           "compressnet",
 	3:           "compressnet",

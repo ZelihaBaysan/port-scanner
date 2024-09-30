@@ -15,7 +15,7 @@ import (
 // - port: The TCP port to scan.
 //
 // Returns:
-// - A string indicating the state of the port: "Open", "Closed", or "Filtered".
+// - A string indicating the state of the port: "Open" or "Closed".
 //
 // Example:
 //
@@ -25,9 +25,6 @@ func ScanPortTCP(ip string, port int) string {
 	timeout := 10 * time.Second
 	conn, err := net.DialTimeout("tcp", address, timeout)
 	if err != nil {
-		if _, ok := err.(*net.OpError); ok {
-			return "Filtered"
-		}
 		return "Closed"
 	}
 	conn.Close()
@@ -46,7 +43,7 @@ func ScanPortTCP(ip string, port int) string {
 // Example:
 //
 //	err := scanUDP(53, "example.com")
-func scanUDP(port int, domain string) error {
+func ScanUDP(port int, domain string) error {
 	address := fmt.Sprintf("%s:%d", domain, port)
 	conn, err := net.DialTimeout("udp", address, 5*time.Second)
 	if err != nil {
@@ -133,7 +130,7 @@ func WorkerTCP(ip string, ports, results chan int, openPorts chan service.Servic
 //	go WorkerUDP("example.com", ports, results, openPorts, done, services)
 func WorkerUDP(domain string, ports, results chan int, openPorts chan service.ServiceVersion, done chan bool, services map[int]string) {
 	for port := range ports {
-		err := scanUDP(port, domain)
+		err := ScanUDP(port, domain)
 		state := "Closed"
 		if err == nil {
 			state = "Open"
@@ -242,11 +239,11 @@ func NewTarget(domain string, numWorkers int) (*PortScanner, error) {
 		OpenPortsUDP:  make(chan service.ServiceVersion, len(ports)),
 		ICMPResults:   make(chan string, len(ips)),
 		Done:          make(chan bool, numWorkers*2+len(ips)),
-		Services:      make(map[int]string),
+		Services:      service.Services,
 	}, nil
 }
 
-// Scan performs the port scanning and writes results to a file.
+// Scan performs the port scanning.
 //
 // Example:
 //
@@ -295,58 +292,70 @@ func (t *PortScanner) Scan() {
 	close(t.OpenPorts)
 	close(t.OpenPortsUDP)
 	close(t.ICMPResults)
+}
 
+// writeResultsToFile writes the scan results to an output file.
+//
+// Parameters:
+// - t: A pointer to the PortScanner instance containing the results.
+// - fileName: The name of the output file to write the results to.
+//
+// Returns:
+// - An error if writing to the file fails, otherwise nil.
+//
+// Example:
+//
+//	err := writeResultsToFile(target, "output.txt")
+func writeResultsToFile(t *PortScanner, fileName string) error {
 	// Write the collected scan results to an output file
-	file, err := os.Create("output.txt")
+	file, err := os.Create(fileName)
 	if err != nil {
-		fmt.Printf("Error creating file: %s\n", err)
-		return
+		return fmt.Errorf("error creating file: %s", err)
 	}
 	defer file.Close()
 
 	// Write open TCP ports and their services to the output file
 	_, err = file.WriteString("Open TCP Ports with Services:\n")
 	if err != nil {
-		fmt.Printf("Error writing to file: %s\n", err)
-		return
+		return fmt.Errorf("error writing to file: %s", err)
 	}
 	for service := range t.OpenPorts {
 		_, err = file.WriteString(fmt.Sprintf("Port %d (TCP) is Open, Service: %s\n", service.Port, service.Service))
 		if err != nil {
-			fmt.Printf("Error writing to file: %s\n", err)
-			return
+			return fmt.Errorf("error writing to file: %s", err)
 		}
 	}
 
 	// Write open UDP ports and their services to the output file
 	_, err = file.WriteString("Open UDP Ports with Services:\n")
 	if err != nil {
-		fmt.Printf("Error writing to file: %s\n", err)
-		return
+		return fmt.Errorf("error writing to file: %s", err)
 	}
 	for service := range t.OpenPortsUDP {
 		_, err = file.WriteString(fmt.Sprintf("Port %d (UDP) is Open, Service: %s\n", service.Port, service.Service))
 		if err != nil {
-			fmt.Printf("Error writing to file: %s\n", err)
-			return
+			return fmt.Errorf("error writing to file: %s", err)
 		}
 	}
 
 	// Write ICMP reachability results to the output file
 	_, err = file.WriteString("ICMP Reachability Results:\n")
 	if err != nil {
-		fmt.Printf("Error writing to file: %s\n", err)
-		return
+		return fmt.Errorf("error writing to file: %s", err)
 	}
 	for result := range t.ICMPResults {
 		_, err = file.WriteString(fmt.Sprintf("%s\n", result))
 		if err != nil {
-			fmt.Printf("Error writing to file: %s\n", err)
-			return
+			return fmt.Errorf("error writing to file: %s", err)
 		}
 	}
+
+	return nil
 }
 
+// main function is the entry point of the program.
+// It prompts the user for a domain, performs port scanning,
+// and writes the results to an output file.
 func main() {
 	var domain string
 	fmt.Print("Enter domain: ")
@@ -361,4 +370,10 @@ func main() {
 
 	// Start the scanning process
 	target.Scan()
+
+	// Write the results to a file
+	err = writeResultsToFile(target, "output.txt")
+	if err != nil {
+		fmt.Printf("Error writing results to file: %s\n", err)
+	}
 }
